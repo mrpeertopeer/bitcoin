@@ -79,10 +79,31 @@ void FuzzFrameworkRegisterTarget(std::string_view name, TypeTestOneInput target,
 static std::string_view g_fuzz_target;
 static const TypeTestOneInput* g_test_one_input{nullptr};
 
+
+#if defined(__clang__) && defined(__linux__)
+extern "C" void __llvm_profile_reset_counters(void) __attribute__((weak));
+extern "C" void __gcov_reset(void) __attribute__((weak));
+
+void ResetCoverageCounters()
+{
+    if (__llvm_profile_reset_counters) {
+        __llvm_profile_reset_counters();
+    }
+
+    if (__gcov_reset) {
+        __gcov_reset();
+    }
+}
+#else
+void ResetCoverageCounters() {}
+#endif
+
+
 void initialize()
 {
-    // Terminate immediately if a fuzzing harness ever tries to create a TCP socket.
-    CreateSock = [](const sa_family_t&) -> std::unique_ptr<Sock> { std::terminate(); };
+    // Terminate immediately if a fuzzing harness ever tries to create a socket.
+    // Individual tests can override this by pointing CreateSock to a mocked alternative.
+    CreateSock = [](int, int, int) -> std::unique_ptr<Sock> { std::terminate(); };
 
     // Terminate immediately if a fuzzing harness ever tries to perform a DNS lookup.
     g_dns_lookup = [](const std::string& name, bool allow_lookup) {
@@ -129,6 +150,8 @@ void initialize()
     Assert(!g_test_one_input);
     g_test_one_input = &it->second.test_one_input;
     it->second.opts.init();
+
+    ResetCoverageCounters();
 }
 
 #if defined(PROVIDE_FUZZ_MAIN_FUNCTION)
